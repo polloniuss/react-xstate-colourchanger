@@ -1,20 +1,20 @@
 {
   "files": {
     "main.css": "/react-xstate-colourchanger/static/css/main.a5a253b5.chunk.css",
-    "main.js": "/react-xstate-colourchanger/static/js/main.8f282690.chunk.js",
-    "main.js.map": "/react-xstate-colourchanger/static/js/main.8f282690.chunk.js.map",
+    "main.js": "/react-xstate-colourchanger/static/js/main.3dcd40f8.chunk.js",
+    "main.js.map": "/react-xstate-colourchanger/static/js/main.3dcd40f8.chunk.js.map",
     "runtime-main.js": "/react-xstate-colourchanger/static/js/runtime-main.e195dcc8.js",
     "runtime-main.js.map": "/react-xstate-colourchanger/static/js/runtime-main.e195dcc8.js.map",
-    "static/js/2.812da6bb.chunk.js": "/react-xstate-colourchanger/static/js/2.812da6bb.chunk.js",
-    "static/js/2.812da6bb.chunk.js.map": "/react-xstate-colourchanger/static/js/2.812da6bb.chunk.js.map",
+    "static/js/2.e96c7290.chunk.js": "/react-xstate-colourchanger/static/js/2.e96c7290.chunk.js",
+    "static/js/2.e96c7290.chunk.js.map": "/react-xstate-colourchanger/static/js/2.e96c7290.chunk.js.map",
     "index.html": "/react-xstate-colourchanger/index.html",
     "static/css/main.a5a253b5.chunk.css.map": "/react-xstate-colourchanger/static/css/main.a5a253b5.chunk.css.map",
-    "static/js/2.812da6bb.chunk.js.LICENSE.txt": "/react-xstate-colourchanger/static/js/2.812da6bb.chunk.js.LICENSE.txt"
+    "static/js/2.e96c7290.chunk.js.LICENSE.txt": "/react-xstate-colourchanger/static/js/2.e96c7290.chunk.js.LICENSE.txt"
   },
   "entrypoints": [
     "static/js/runtime-main.e195dcc8.js",
-    "static/js/2.812da6bb.chunk.js",
+    "static/js/2.e96c7290.chunk.js",
     "static/css/main.a5a253b5.chunk.css",
-    "static/js/main.8f282690.chunk.js"
+    "static/js/main.3dcd40f8.chunk.js"
   ]
 }
