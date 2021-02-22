@@ -177,8 +177,7 @@ export const dmMachine: MachineConfig<SDSContext, any, SDSEvent> = ({
                 { cond: (context) =>  context.nluData.intent.name === 'timer',
                     target: "timer"
                 },
-                { entry: say("Nope, duh can you repeat clearly?"),
-                    target: "welcome" }]
+                { target: "welcome" }]
             },
             states: {
                 prompt: {
