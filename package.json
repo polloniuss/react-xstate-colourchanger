@@ -1,5 +1,5 @@
 {
-  "homepage": "https://vladmaraev.github.io/react-xstate-colourchanger",
+  "homepage": "https://polloniuss.github.io/react-xstate-colourchanger",
   "name": "xstate-react-typescript-template",
   "version": "1.0.0",
   "description": "",
@@ -10,8 +10,8 @@
     "@types/webspeechapi": "0.0.29",
     "@xstate/inspect": "^0.4.1",
     "@xstate/react": "1.0.1",
+    "core-js": "^3.8.3",
     "node-sass": "^4.14.1",
-    "react": "17.0.1",
     "react-dom": "17.0.1",
     "react-scripts": "4.0.0",
     "react-speech-kit": "^3.0.1",
@@ -22,6 +22,7 @@
     "@types/react-dom": "16.8.2",
     "eslint-plugin-react-hooks": "^4.2.0",
     "gh-pages": "^3.1.0",
+    "react": "^17.0.1",
     "typescript": "3.3.3"
   },
   "scripts": {
