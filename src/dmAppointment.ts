@@ -1,23 +1,419 @@
-import { MachineConfig, send, Action, assign } from "xstate";
+import { MachineConfig, Action, assign, actions } from "xstate"
+const { send, cancel } = actions
 
-import { inspect } from '@xstate/inspect';
-
+import { inspect } from '@xstate/inspect'
 inspect({
   url: "https://statecharts.io/inspect",
   iframe: false
 });
 
+import { nluRequest } from "./index.tsx"
+import { loadGrammar } from './runparser'
+import { parse } from './chartparser'
+import { grammar } from './grammars/quotesGrammar.ts'
+
 function say(text: string): Action<SDSContext, SDSEvent> {
     return send((_context: SDSContext) => ({ type: "SPEAK", value: text }))
 }
-
 function listen(): Action<SDSContext, SDSEvent> {
     return send('LISTEN')
 }
+function prompt(prompt: string): MachineConfig<SDSContext, any, SDSEvent> {
+    return ({
+        initial: 'prompt',
+        states: {
+            prompt: {
+                entry: say(prompt)
+            }
+        }
+    })
+}
+function promptAndAsk(prompt: string, nomatch: string, help: string): MachineConfig<SDSContext, any, SDSEvent> {
+    return ({
+        initial: 'prompt',
+        states: {
+                prompt: {
+                    entry: say(prompt),
+                    on: { ENDSPEECH: 'ask' }
+                },
+                ask: {
+                    entry: [send('LISTEN'), send('MAXSPEECH', { delay: 8000, id: 'maxsp' })]
+                },
+                nomatch: {
+                    entry: say(nomatch),
+                    on: { ENDSPEECH: [{ 
+                            actions: cancel('maxsp'),
+                            target: "prompt" 
+                    }] }
+                },
+                help: {
+                    entry: say(help),
+                    on: { ENDSPEECH: [{ 
+                            actions: cancel('maxsp'),
+                            target: "prompt" 
+                    }] }
+                }
+        }
+    })
+}
 
-import { nluRequest } from "./index.tsx";
+export const dmMachine: MachineConfig<SDSContext, any, SDSEvent> = ({
+    initial: 'init',
+    states: {
+        init: {
+            on: {
+                CLICK: 'start'
+            }
+        },
+        start: {
+            initial: 'welcome',
+            on: {
+                MAXSPEECH: [
+                    { 
+                        cond: (context) => context.counter === 1,
+                        target: "second_call"
+                    },
+                    {
+                        cond: (context) => context.counter === 2,
+                        target: "last_call"
+                    },
+                    {
+                        target: "first_call"
+                    }
+                ]
+            },
+            states: {
+                hist: { type: 'history' },
+                welcome: {
+                    on: { RECOGNISED: 
+                            {   actions: cancel('maxsp'),
+                                target: 'query'
+                            }
+                    },
+                    ...promptAndAsk("What do you want me to do?"),
+                },
+                query: {
+                    invoke: {
+                        id: 'rasa',
+                        src: (context, event) => nluRequest(context.recResult),
+                        onDone: {
+                            actions: [ assign((context, event) => { return { nluData: event.data }}), cancel('maxsp')],
+                            target: 'rasaChoice'
+                        },
+                        onError: {
+                            actions: [ assign({ errorMessage: (context, event) => console.log(event.data)}), cancel('maxsp')],
+                            target: 'failure',
+                        }
+                    }
+                },
+                failure: {
+                    initial: "prompt",
+                    on: { ENDSPEECH: "welcome" },
+                    states: {
+                        prompt: { entry: say("There is an error. Please check your proxy, your browser or retry later.") }
+                    }
+                },
+                rasaChoice: {
+                    initial: "prompt",
+                    on: { ENDSPEECH: [{ 
+                            cond: (context) =>  context.nluData.intent.name === 'appointment',
+                            target: "appointment"
+                        },
+                        { cond: (context) =>  context.nluData.intent.name === 'TODO_item',
+                            target: "todo"
+                        },
+                        { cond: (context) =>  context.nluData.intent.name === 'timer',
+                            target: "timer"
+                        },
+                        { target: "welcome" }]
+                    },
+                    ...prompt("Actualization."),
+                },
+                appointment: {
+                    ...prompt("Okay, let's create an appointment!"),
+                    on: { ENDSPEECH: 
+                            { actions: cancel('maxsp'),
+                            target: "who" },
+                    }
+                },
+                todo: {
+                    ...prompt("Let's create a to-do list!"),
+                    on: { ENDSPEECH: 
+                            { actions: cancel('maxsp'),
+                            target: "welcome" },
+                    }
+                },
+                timer: {
+                    ...prompt("Let's start a timer!"),
+                    on: { ENDSPEECH: 
+                            { actions: cancel('maxsp'),
+                            target: "welcome" },
+                    }
+                },
+                who: {
+                    initial: "prompt",
+                    on: {
+                        RECOGNISED: [{
+                            cond: (context) => "person" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { person: dict[context.recResult].person } }), cancel('maxsp')],
+                            target: "day"
 
-const grammar: { [index: string]: { person?: string, day?: string, time?: string, agree?: string, refuse?: string, appointment?: string, todoitem?: string, timer?: string } } = {
+                        },
+                        {
+                            cond:(context) => "help" in (dict[context.recResult] || {}),
+                            target: ".help"
+                        },
+                        { target: ".nomatch" }]
+                    },
+                    ...promptAndAsk("Who are you meeting with?","Sorry, I don't know them.", "You can say Jennifer or John for example.")
+                },
+                day: {
+                    initial: "prompt",
+                    on: {
+                        RECOGNISED: [{
+                            cond: (context) => "day" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { day: dict[context.recResult].day } }), cancel('maxsp')],
+                            target: "duration"
+
+                        },
+                        {
+                            cond:(context) => "help" in (dict[context.recResult] || {}),
+                            target: ".help"
+                        },
+                        { target: ".nomatch" }]
+                    },
+                    states: {
+                        prompt: {
+                            entry: send((context) => ({
+                                type: "SPEAK",
+                                value: 'On which day is your meeting?',
+                            })),
+                            on: { ENDSPEECH: "ask" }
+                        },
+                        ask: {
+                            entry: [ 
+                                send('LISTEN'),
+                                send('MAXSPEECH', { delay: 8000, id: 'maxsp' })
+                            ]
+                        },
+                        help: {
+                            entry: say("You can say monday, tuesday and so on."),
+                            on: { ENDSPEECH: [{ 
+                                    actions: cancel('maxsp'),
+                                    target: "prompt"
+                            }] }
+                        },
+                        nomatch: {
+                            entry: say("Sorry, can you repeat?"),
+                            on: { ENDSPEECH: [{ 
+                                    actions: cancel('maxsp'),
+                                    target: "prompt"
+                            }] }
+                        },
+                    }
+                },
+                duration: {
+                    initial: "prompt",
+                    on: {
+                        RECOGNISED: [{
+                            cond: (context) => "agree" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { agree: dict[context.recResult].agree } }), cancel('maxsp')],
+                            target: "confirmationWholeDay"
+                        },
+                        {   
+                            cond: (context) => "refuse" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { refuse: dict[context.recResult].refuse } }), cancel('maxsp')],
+                            target: "time"
+                        },
+                        {
+                            cond:(context) => "help" in (dict[context.recResult] || {}),
+                            target: ".help"
+                        },
+                        { target: ".nomatch" }],
+                    },
+                    ...promptAndAsk("Will it take the whole day?","Sorry, can you repeat?", "You can answer with yes or no.")
+                },
+                time: {
+                    initial: "prompt",
+                    on: {
+                        RECOGNISED: [{
+                            cond: (context) => "time" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { time: dict[context.recResult].time } }), cancel('maxsp')],
+                            target: "regularConfirmation"
+                        },
+                        {
+                            cond:(context) => "help" in (dict[context.recResult] || {}),
+                            target: ".help"
+                        },
+                        { target: ".nomatch" }]
+                    },
+                    ...promptAndAsk("What time is your meeting?","Sorry, can you repeat?", "You can choose between 8 to 12 or 1 to 6.")
+                },
+                regularConfirmation: {
+                    initial: "prompt",
+                    on: {
+                        RECOGNISED: [{
+                            cond: (context) => "agree" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { agree: dict[context.recResult].agree } }), cancel('maxsp')],
+                            target: "confirmation"
+                        },
+                        {
+                            cond:(context) => "help" in (dict[context.recResult] || {}),
+                            target: ".help"
+                        },
+                        {   
+                            cond: (context) => "refuse" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { refuse: dict[context.recResult].refuse } }), cancel('maxsp')],
+                            target: "who"
+                        },
+                        { target: ".nomatch" }],
+                    },
+                    states: {
+                        prompt: {
+                            entry: send((context) => ({
+                                type: "SPEAK",
+                                value: `Do you want me to create an appointment with ${context.person} on ${context.day} at ${context.time} ?`
+                            })),
+                            on: { ENDSPEECH: "ask" }
+                        },
+                        ask: {
+                            entry: [ 
+                                send('LISTEN'),
+                                send('MAXSPEECH', { delay: 8000, id: 'maxsp' })
+                            ]
+                        },
+                        help: {
+                            entry: say("You can answer with yes or no."),
+                            on: { ENDSPEECH: [{ 
+                                    actions: cancel('maxsp'),
+                                    target: "prompt"
+                            }] }
+                        },
+                        nomatch: {
+                            entry: say("Sorry can you repeat?"),
+                            on: { ENDSPEECH: [{ 
+                                    actions: cancel('maxsp'),
+                                    target: "prompt"
+                            }] }
+                        },
+                    }
+                },
+                confirmationWholeDay: {
+                    initial: "prompt",
+                    on: {
+                        RECOGNISED: [{
+                            cond: (context) => "agree" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { agree: dict[context.recResult].agree } }), cancel('maxsp')],
+                            target: "confirmation"
+                        },
+                        {   
+                            cond: (context) => "refuse" in (dict[context.recResult] || {}),
+                            actions: [ assign((context) => { return { refuse: dict[context.recResult].refuse } }), cancel('maxsp')],
+                            target: "who"
+                        },
+                        {
+                            cond:(context) => "help" in (dict[context.recResult] || {}),
+                            target: ".help"
+                        },
+                        { target: ".nomatch" }],
+                    },
+                    states: {
+                        prompt: {
+                            entry: send((context) => ({
+                                type: "SPEAK",
+                                value: `Do you want me to create an appointment with ${context.person} on ${context.day} for the whole day?`
+                            })),
+                            on: { ENDSPEECH: "ask" }
+                        },
+                        ask: {
+                            entry: [ 
+                                send('LISTEN'),
+                                send('MAXSPEECH', { delay: 8000, id: 'maxsp' })
+                            ]
+                        },
+                        help: {
+                            entry: say("You can answer with yes or no."),
+                            on: { ENDSPEECH: [{ 
+                                    actions: cancel('maxsp'),
+                                    target: "prompt"
+                            }] }
+                        },
+                        nomatch: {
+                            entry: say("Sorry can you repeat?"),
+                            on: { ENDSPEECH: [{ 
+                                    actions: cancel('maxsp'),
+                                    target: "prompt"
+                            }] }
+                        },
+                    }
+                },
+                confirmation: {
+                    ...prompt("Your appointment has been created!"),
+                    on: { ENDSPEECH: "welcome" }
+                }
+            }
+        },
+        first_call: {
+            entry: say("Please focus on my question."),
+            on: {
+                ENDSPEECH: [
+                    {
+                        cond: (context) => context.counter === 1,
+                        target: "#root.dm.start.hist"
+                    },
+                    {
+                        cond: (context) => context.counter === 2,
+                        target: "#root.dm.start.hist"
+                    },
+                    {
+                        cond: (context) => context.counter === 3,
+                        target: "#root.dm.start.hist"
+                    },
+                ],
+            }
+        },
+        second_call: {
+            entry: say("Are you still listening?"),
+            on: {
+                ENDSPEECH: [
+                    {
+                        cond: (context) => context.counter === 1,
+                        target: "#root.dm.start.hist"
+                    },
+                    {
+                        cond: (context) => context.counter === 2,
+                        target: "#root.dm.start.hist"
+                    },
+                    {
+                        cond: (context) => context.counter === 3,
+                        target: "#root.dm.start.hist"
+                    },
+                ],
+            }
+        },
+        last_call: {
+            entry: say("Whatever, I don't want to listen anymore."),
+            on: {
+                ENDSPEECH: [
+                    {
+                        cond: (context) => context.counter === 1,
+                        target: "#root.dm.start.hist"
+                    },
+                    {
+                        cond: (context) => context.counter === 2,
+                        target: "#root.dm.start.hist"
+                    },
+                    {
+                        cond: (context) => context.counter === 3,
+                        target: "#root.dm"
+                    },
+                ],
+            }
+        },
+    }
+})
+
+const dict: { [index: string]: { person?: string, day?: string, time?: string, agree?: string, refuse?: string, appointment?: string, todoitem?: string, timer?: string } } = {
     "John": { person: "John Appleseed" },
     "Mary": { person: "Mary Orangeseed" },
     "Dan": { person: "Dan Cherryseed" },
@@ -119,303 +515,9 @@ const grammar: { [index: string]: { person?: string, day?: string, time?: string
     "I don't think so": { refuse: "no" },
     "no way": { refuse: "no" },
     "absolutely not": { refuse: "no" },
+    "help": { help: "help" },
+    "I don't understand": { help: "help" },
+    "please help": { help: "help" },
+    "can you repeat": { help: "help" },
+    "let's go back": { help: "help" },
 }
-
-export const dmMachine: MachineConfig<SDSContext, any, SDSEvent> = ({
-    initial: 'init',
-    states: {
-        init: {
-            on: {
-                CLICK: 'welcome'
-            }
-        },
-        welcome: {
-            initial: "prompt",
-            on: { RECOGNISED: 
-                { target: 'query' }
-            },
-            states: {
-                prompt: {
-                    entry: say("What would you like to do?"),
-                    on: { ENDSPEECH: "ask" }
-                },
-                ask: {
-                    entry: listen()
-                }
-            }
-        },
-        query: {
-            invoke: {
-                id: 'rasa',
-                src: (context, event) => nluRequest(context.recResult),
-                onDone: {
-                    actions: assign((context, event) => { return { nluData: event.data }}),
-                    target: 'rasaChoice'
-                },
-                onError: {
-                    actions: assign({ errorMessage: (context, event) => console.log(event.data)}),
-                    target: 'failure',
-                }
-            }
-        },
-        failure: {
-            initial: "prompt",
-            on: { ENDSPEECH: "init" },
-            states: {
-                prompt: { entry: say("There is an error. Please check your proxy, your browser or retry later.") }
-            }
-        },
-        rasaChoice: {
-            initial: "prompt",
-            on: { ENDSPEECH: [{ 
-                cond: (context) =>  context.nluData.intent.name === 'appointment',
-                target: "appointment"
-                },
-                { cond: (context) =>  context.nluData.intent.name === 'TODO_item',
-                    target: "todo"
-                },
-                { cond: (context) =>  context.nluData.intent.name === 'timer',
-                    target: "timer"
-                },
-                { target: "welcome" }]
-            },
-            states: {
-                prompt: {
-                    entry: say("Actualization.")
-                }
-            }
-        },
-        /*choice: {
-            initial: "prompt",
-            on: {
-                RECOGNISED: [{
-                    //cond: (context) => "appointment" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { appointment: grammar[ context.recResult].appointment } }),
-                    target: "appointment"
-                },
-                {
-                    //cond: (context) => "todoitem" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { todoitem: grammar[ context.recResult].todoitem } }),
-                    target: "todo"
-                },
-                {
-                    //cond: (context) => "timer" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { timer: grammar[ context.recResult].timer } }),
-                    target: "timer"
-                },
-                { target: ".nomatch" }]
-            },
-            states: {
-                prompt: {
-                    entry: say("What would you like to do?"),
-                    on: { ENDSPEECH: "ask" }
-                },
-                ask: {
-                    entry: listen()
-                },
-                nomatch: {
-                    entry: say("Please, choose between appointment, to do list and timer."),
-                    on: { ENDSPEECH: "prompt" }
-                }
-            }
-        },*/
-        appointment: {
-            initial: "prompt",
-            on: { ENDSPEECH: "who" },
-            states: {
-                prompt: { entry: say("Let's create an appointment!") }
-            }
-        },
-        todo: {
-            initial: "prompt",
-            on: { ENDSPEECH: "init" },
-            states: {
-                prompt: { entry: say("Let's create a to-do list!") }
-            }
-        },
-        timer: {
-            initial: "prompt",
-            on: { ENDSPEECH: "init" },
-            states: {
-                prompt: { entry: say("Let's start a timer!") }
-            }
-        },
-        who: {
-            initial: "prompt",
-            on: {
-                RECOGNISED: [{
-                    cond: (context) => "person" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { person: grammar[context.recResult].person } }),
-                    target: "day"
-
-                },
-                { target: ".nomatch" }]
-            },
-            states: {
-                prompt: {
-                    entry: say("Who are you meeting with?"),
-                    on: { ENDSPEECH: "ask" }
-                },
-                ask: {
-                    entry: listen()
-                },
-                nomatch: {
-                    entry: say("Sorry I don't know them."),
-                    on: { ENDSPEECH: "prompt" }
-                }
-            }
-        },
-        day: {
-            initial: "prompt",
-            on: {
-                RECOGNISED: [{
-                    cond: (context) => "day" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { day: grammar[context.recResult].day } }),
-                    target: "duration"
-
-                },
-                { target: ".nomatch" }]
-            },
-            states: {
-                prompt: {
-                    entry: send((context) => ({
-                        type: "SPEAK",
-                        value: 'On which day is your meeting?',
-                    })),
-                    on: { ENDSPEECH: "ask" }
-                },
-                ask: {
-                    entry: listen()
-                },
-                nomatch: {
-                    entry: say("Sorry, can you repeat?"),
-                    on: { ENDSPEECH: "prompt" }
-                },
-            }
-        },
-        duration: {
-            initial: "prompt",
-            on: {
-                RECOGNISED: [{
-                    cond: (context) => "agree" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { agree: grammar[context.recResult].agree } }),
-                    target: "confirmationWholeDay"
-                },
-                {   
-                    cond: (context) => "refuse" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { refuse: grammar[context.recResult].refuse } }),
-                    target: "time"
-                },
-                { target: ".nomatch" }],
-            },
-            states: {
-                prompt: {
-                    entry: say("Will it take the whole day?"),
-                    on: { ENDSPEECH: "ask" }
-                },
-                ask: {
-                    entry: listen()
-                },
-                nomatch: {
-                    entry: say("Sorry, can you answer with yes or no?"),
-                    on: { ENDSPEECH: "prompt" }
-                },
-            }
-        },
-        time: {
-            initial: "prompt",
-            on: {
-                RECOGNISED: [{
-                    cond: (context) => "time" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { time: grammar[context.recResult].time } }),
-                    target: "regularConfirmation"
-                },
-                { target: ".nomatch" }]
-            },
-            states: {
-                prompt: {
-                    entry: say("What time is your meeting?"),
-                    on: { ENDSPEECH: "ask" }
-                },
-                ask: {
-                    entry: listen()
-                },
-                nomatch: {
-                    entry: say("Sorry can you choose between 8 to 12 or 1 to 6?"),
-                    on: { ENDSPEECH: "prompt" }
-                },
-            }
-        },
-        regularConfirmation: {
-            initial: "prompt",
-            on: {
-                RECOGNISED: [{
-                    cond: (context) => "agree" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { agree: grammar[context.recResult].agree } }),
-                    target: "confirmation"
-                },
-                {   
-                    cond: (context) => "refuse" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { refuse: grammar[context.recResult].refuse } }),
-                    target: "who"
-                },
-                { target: ".nomatch" }],
-            },
-            states: {
-                prompt: {
-                    entry: send((context) => ({
-                        type: "SPEAK",
-                        value: `Do you want me to create an appointment with ${context.person} on ${context.day} at ${context.time} ?`
-                    })),
-                    on: { ENDSPEECH: "ask" }
-                },
-                ask: {
-                    entry: listen()
-                },
-                nomatch: {
-                    entry: say("Sorry can you answer with yes or no?"),
-                    on: { ENDSPEECH: "prompt" }
-                },
-            }
-        },
-        confirmationWholeDay: {
-            initial: "prompt",
-            on: {
-                RECOGNISED: [{
-                    cond: (context) => "agree" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { agree: grammar[context.recResult].agree } }),
-                    target: "confirmation"
-                },
-                {   
-                    cond: (context) => "refuse" in (grammar[context.recResult] || {}),
-                    actions: assign((context) => { return { refuse: grammar[context.recResult].refuse } }),
-                    target: "who"
-                },
-                { target: ".nomatch" }],
-            },
-            states: {
-                prompt: {
-                    entry: send((context) => ({
-                        type: "SPEAK",
-                        value: `Do you want me to create an appointment with ${context.person} on ${context.day} for the whole day?`
-                    })),
-                    on: { ENDSPEECH: "ask" }
-                },
-                ask: {
-                    entry: listen()
-                },
-                nomatch: {
-                    entry: say("Sorry can you answer with yes or no?"),
-                    on: { ENDSPEECH: "prompt" }
-                },
-            }
-        },
-        confirmation: {
-            initial: "prompt",
-            on: { ENDSPEECH: "init" },
-            states: {
-                prompt: { entry: say("Your appointment has been created!") }
-            }
-        }
-    }
-})

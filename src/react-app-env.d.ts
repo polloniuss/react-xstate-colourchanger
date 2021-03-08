@@ -9,6 +9,7 @@ interface SDSContext {
     person: string,
     day: string,
     time: string,
+    counter: any,
 }
 
 type SDSEvent =
@@ -17,4 +18,5 @@ type SDSEvent =
     | { type: 'ASRRESULT', value: string }
     | { type: 'ENDSPEECH' }
     | { type: 'LISTEN' }
-    | { type: 'SPEAK', value: string };
+    | { type: 'SPEAK', value: string }
+    | { type: 'MAXSPEECH' };

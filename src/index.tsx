@@ -14,7 +14,7 @@ inspect({
 
 import { useSpeechSynthesis, useSpeechRecognition } from 'react-speech-kit';
 
-
+let count = 0
 const machine = Machine<SDSContext, any, SDSEvent>({
     id: 'root',
     type: 'parallel',
@@ -44,7 +44,17 @@ const machine = Machine<SDSContext, any, SDSEvent>({
                                 assign((_context, event) => { return { recResult: event.value } })],
                             target: '.match'
                         },
-                        RECOGNISED: 'idle'
+                        RECOGNISED: 'idle',
+                        MAXSPEECH: {
+                            actions: assign((context) => {
+                                if (context.counter) {
+                                    return { counter: context.counter + 1 }
+                                } else {
+                                    return { counter: count + 1 }
+                                }
+                            }),
+                            target: 'idle'
+                        },
                     },
                     states: {
 		    	progress: {
