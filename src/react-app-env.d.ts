@@ -6,10 +6,13 @@ interface SDSContext {
     recResult: string;
     nluData: any;
     ttsAgenda: string;
-    person: string,
-    day: string,
-    time: string,
-    counter: any,
+    work: integer;
+    party: integer;
+    call: integer;
+    sleep: integer;
+    projectSubmitted: integer;
+    count: integer;
+    counter: any;
 }
 
 type SDSEvent =
